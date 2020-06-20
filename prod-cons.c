@@ -8,8 +8,8 @@
 
 #define QUEUESIZE 100
 #define LOOP 1000
-#define P 32
-#define Q 512
+#define P 128
+#define Q 32
 #define PI 3.14159265
 #define FUNCTIONSREPS 10
 
@@ -41,11 +41,12 @@ typedef struct{
 // 1) 	threadPrint(): print the thread ID.
 // 2)   calculateSin(): computes the sin() of 10 consecutive values 
 //      in degrees, with the base value being the thread id, so
-//		different threads compute different values
+//		  different threads compute different values
 typedef struct { 
 	int tid;
 	time_t start;
 } threadFuncArg;
+
 void * threadPrint(void *arg){
 	threadFuncArg* a = (threadFuncArg *) arg;
 	printf("Hello from thread #%d\n", a->tid);
@@ -56,10 +57,7 @@ void * calculateSin(void *arg){
 	double temp;
 	for(int i=0; i<FUNCTIONSREPS; ++i)
 		temp = sin( (tid + i)*PI/10 );
-	//printf("%f\n", temp);
-	//printf("%d\n", tid);
 }
-	
 
 queue *queueInit (void);
 void queueDelete (queue *q);
@@ -68,9 +66,11 @@ void queueDel (queue *q, workFunc *out);
 
 // Define global variable to signal termination of producers
 int PRODUCERS_TERMINATED = 0;
+
 // Mutex to detect when producers stop
 pthread_mutex_t *prodCountMut;
 int finishedProducers = 0;
+
 // Mutex to update global variable TOTAL_TIME_G from each consumer thread
 pthread_mutex_t *timeMut;
 double TOTAL_TIME_G = 0;
@@ -102,24 +102,25 @@ int main ()
     exit (1);
   }
   
+  // Span consumers
   for(int i=0; i<Q; ++i){
 	  conArgs[i].tid = i;
 	  conArgs[i].q = fifo;
 	  pthread_create (&con[i], NULL, consumer, (void *)(conArgs + i));
   }
+
+  // Span producers
   for(int i=0; i<P; ++i){
 	  proArgs[i].tid = i;
 	  proArgs[i].q = fifo;
 	  pthread_create (&pro[i], NULL, producer, (void *)(proArgs + i));
   }
   
-  for(int i=0; i<P; ++i) {
+  // Terminate producers
+  for(int i=0; i<P; ++i)
 	  pthread_join (pro[i], NULL);
-  }
 	  
-  //PRODUCERS_TERMINATED = 1;
-
-  int first;
+  // Terminate consumers
   for(int i=0; i<Q; ++i)
 	  pthread_join (con[i], NULL);
 
@@ -161,9 +162,7 @@ void *producer (void *arg)
     struct timeval tv;
     gettimeofday(&tv, NULL); 
     a->start=tv.tv_usec;
-    //item.start = tv.tv_usec;
     item.arg = (void *) a;
-    //
     
     queueAdd (fifo, item);
     pthread_mutex_unlock (fifo->mut);
@@ -207,32 +206,31 @@ void *consumer (void *arg)
     }
     
     if( fifo->empty && PRODUCERS_TERMINATED ){
-		pthread_mutex_unlock(fifo->mut);
-		pthread_cond_broadcast(fifo->notEmpty);
-		break;
-	}
+      pthread_mutex_unlock(fifo->mut);
+      pthread_cond_broadcast(fifo->notEmpty);
+      break;
+	  }
 
-	queueDel (fifo, &d);
-	pthread_mutex_unlock (fifo->mut);
-	pthread_cond_signal (fifo->notFull);
-	
-	// Measure time
-	threadFuncArg *arg = (threadFuncArg *) d.arg;
-	time_t start = arg->start;
-	//start = d.start;
-	time_t end;
-	double elapsedTime;
-	struct timeval tv;
-	gettimeofday(&tv, NULL); 
-	end=tv.tv_usec;
-	//elapsedTime = (end-start) / 1000.0;   // us to ms
-	elapsedTime = (end - start);
-	total_time += elapsedTime;
-	
-	// Do the actual work
-	(*d.work)(d.arg);
-	
-	if( fifo->empty && PRODUCERS_TERMINATED ) break;
+    queueDel (fifo, &d);
+    pthread_mutex_unlock (fifo->mut);
+    pthread_cond_signal (fifo->notFull);
+    
+    // Measure time
+    threadFuncArg *arg = (threadFuncArg *) d.arg;
+    time_t start = arg->start;
+    //start = d.start;
+    time_t end;
+    double elapsedTime;
+    struct timeval tv;
+    gettimeofday(&tv, NULL); 
+    end=tv.tv_usec;
+    elapsedTime = (end - start);
+    total_time += elapsedTime;
+    
+    // Do the actual work
+    (*d.work)(d.arg);
+    
+    if( fifo->empty && PRODUCERS_TERMINATED ) break;
 
   }
   
