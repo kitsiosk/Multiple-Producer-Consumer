@@ -8,8 +8,8 @@
 
 #define QUEUESIZE 100
 #define LOOP 1000
-#define P 128
-#define Q 32
+#define P 1
+#define Q 4
 #define PI 3.14159265
 #define FUNCTIONSREPS 10
 
@@ -39,8 +39,8 @@ typedef struct{
 
 // Functions to be used in the fifo
 // 1) 	threadPrint(): print the thread ID.
-// 2)   calculateSin(): computes the sin() of 10 consecutive values 
-//      in degrees, with the base value being the thread id, so
+// 2)   calculateSin(): computes the sin() of 10(FUNCTIONSREPS) consecutive  
+//      values in degrees, with the base value being the thread id, so
 //		  different threads compute different values
 typedef struct { 
 	int tid;
@@ -80,6 +80,7 @@ int main ()
   queue *fifo;
   pthread_t *pro, *con;
   threadArg *proArgs, *conArgs;
+
   pro = (pthread_t *) malloc( P * sizeof(pthread_t) );
   con = (pthread_t *) malloc( Q * sizeof(pthread_t) );
   proArgs = (threadArg *) malloc( P * sizeof(threadArg) );
@@ -91,10 +92,10 @@ int main ()
   timeMut = (pthread_mutex_t *) malloc (sizeof(pthread_mutex_t));
   pthread_mutex_init(timeMut, NULL);
   
-  // Array that holds elapsed time at each consumer thread
-  // It will be passed by value to the thread.
-  double timeElapsed[Q];
-  for(int i=0; i<Q; ++i) timeElapsed[i] = 0;
+  // // Array that holds elapsed time at each consumer thread
+  // // It will be passed by value to the thread.
+  // double timeElapsed[Q];
+  // for(int i=0; i<Q; ++i) timeElapsed[i] = 0;
 
   fifo = queueInit ();
   if (fifo ==  NULL) {
