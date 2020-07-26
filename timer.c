@@ -5,6 +5,7 @@
 #include <sys/time.h>
 #include <time.h>
 #include <math.h>
+#include <stdint.h>
 
 #define QUEUESIZE 4
 #define LOOP 1000
@@ -12,9 +13,10 @@
 #define Q 4
 #define PI 3.14159265
 #define FUNCTIONREPS 10
-#define TIMERREPS 4
-#define PERIOD 1000
-
+#define TIMERREPS 3000
+#define PERIOD1 1e5 // in usec
+// #define PERIOD2 1e5
+// #define PERIOD3 1e4
 // // Number of timers( must be equal to P )
 // #define NTIMERS 1
 
@@ -34,7 +36,7 @@ typedef struct{
 
 // Array that keeps track of time between prod/cons activations
 typedef struct{
-  time_t buff[P*TIMERREPS];
+  double buff[P*TIMERREPS];
   int nextFree;
 } array;
 
@@ -67,7 +69,7 @@ typedef struct{
 //		  different threads compute different values
 typedef struct { 
 	int tid;
-	time_t start;
+	double start;
 } threadFuncArg;
 
 void * threadPrint(void *arg){
@@ -150,13 +152,15 @@ void arrayAdd(array *x, double a){
 }
 
 void arrayPrint(array *x, int size){
-  for(int i=0; i<size; ++i) printf("%d ", x->buff[i]);
+  for(int i=0; i<size; ++i) printf("%0.0f ", x->buff[i]);
   printf("\n");
 }
 // ////
 int main(){
     printf("Starting Main\n");
 
+    // int periods[3] = {1e6, 1e5, 1e4};
+    // int timerreps[3] = {120, 1200, 12000};
     //Initialize queue
     queue *fifo;
     fifo = queueInit (QUEUESIZE);
@@ -199,7 +203,7 @@ int main(){
 
     // Span producers
     for(int i=0; i<P; ++i){
-        t[i] = *timerInit(PERIOD, TIMERREPS, 0);
+        t[i] = *timerInit(PERIOD1, TIMERREPS, 0);
         proArgs[i].tid = i;
         proArgs[i].q = fifo;
         proArgs[i].t = (t+i);
@@ -214,9 +218,20 @@ int main(){
     for(int i=0; i<Q; ++i)
       pthread_join (con[i], NULL);
 
-    printf("Overall average time elapsed: %lf\n", TOTAL_TIME_G/(P*4));
-    arrayPrint(prodArray, P*TIMERREPS);
-    arrayPrint(conArray,  P*TIMERREPS );
+    // printf("Overall average time elapsed: %lf\n", TOTAL_TIME_G/(P*4));
+    // arrayPrint(prodArray, P*TIMERREPS);
+    // arrayPrint(conArray,  P*TIMERREPS );
+
+    FILE *f1 = fopen("prodArrTest.txt", "w");
+    for(int i=0; i<P*TIMERREPS; ++i){
+      fprintf(f1, "%0.0f,", prodArray->buff[i]);
+    }
+    fclose(f1);
+    FILE *f2 = fopen("conArrTest.txt", "w");
+    for(int i=0; i<P*TIMERREPS; ++i){
+      fprintf(f2, "%0.0f,", conArray->buff[i]);
+    }
+    fclose(f2);
     // Clean up
     queueDelete (fifo);
     pthread_mutex_destroy(prodCountMut);
@@ -234,15 +249,15 @@ void *producer (void *arg)
   int i, tid;
   Timer *t;
   double total_drift = 0;
+  double currentTime;
 
   struct timeval tv;
   // Time elapsed since last insert to queue
-  time_t last;
+  double last;
   // Get current time
-  struct timespec ts;
-  clock_gettime( 1, &ts );
-  // gettimeofday( &tv, NULL);
-  last = ts.tv_sec;
+  gettimeofday( &tv, NULL );
+  last = 1e6*tv.tv_sec + tv.tv_usec;
+  currentTime =  last;
   
   threadArg *proArg;
   proArg = (threadArg *) arg;
@@ -251,48 +266,51 @@ void *producer (void *arg)
   t = proArg->t;
 
   for (i = 0; i < t->TasksToExecute; ++i) {
+    // if( i % 100 == 0 ) printf("%d/%d\n", i, t->TasksToExecute);
     pthread_mutex_lock (fifo->mut);
     while (fifo->full) {
-      printf ("producer: queue FULL.\n");
+      // printf ("producer: queue FULL.\n");
       pthread_cond_wait (fifo->notFull, fifo->mut);
     }
-
-    // Calculate sleep time from current time, last time and Period
-    clock_gettime(1, &ts); 
-    time_t drift = ts.tv_sec - last;
-    total_drift += drift;
-    arrayAdd(prodArray, drift);
-    time_t sleepTime = t->Period - drift;
-    // printf("%d %d\n", ts.tv_sec, last);
-    printf("Sleeping for %d ms\n", sleepTime);
-    usleep( 1000 * sleepTime);
-    printf("Waking up\n");
     
     // Update the time when the last element was added to the queue
-    last = ts.tv_sec;
+    // struct timeval tv;
+    gettimeofday(&tv, NULL); 
+    last = 1e6*tv.tv_sec + tv.tv_usec;
 
     
     // Create fifo item to insert to queue
     workFunc item;
-    item.work = &threadPrint;
+    item.work = &calculateSin;
     threadFuncArg *a = (threadFuncArg *) malloc( sizeof(threadFuncArg) );
     a->tid = tid;
     // Get current time
     gettimeofday( &tv, NULL );
     // Pass current time to queue item
-    a->start=tv.tv_sec;
+    a->start = 1e6*tv.tv_sec + tv.tv_usec;
     item.arg = (void *) a;
     // printf("%d\n", a->start);
 
     queueAdd (fifo, item);
-    printf("Current Queue size: %d\n", fifo->tail - fifo->head);
+    // printf("Current Queue size: %d\n", fifo->tail - fifo->head);
     pthread_mutex_unlock (fifo->mut);
     pthread_cond_signal (fifo->notEmpty);
 
-    // // Add current time to time array
-    // pthread_mutex_lock(prodArrayMut);
-    // arrayAdd(prodArray, a->start);
-    // pthread_mutex_unlock(prodArrayMut);
+    // After unlocking mutex, go to sleep
+    // Calculate sleep time from current time, last time and Period
+    double drift = last - currentTime;
+
+    arrayAdd(prodArray, drift);
+    double sleepTime = t->Period - drift;
+    if( sleepTime > 0 ){
+      // printf("Sleeping for %ld usec\n", sleepTime);
+      usleep(sleepTime);
+    }else{
+      printf("Not sleeping\n");
+    }
+    struct timeval tv;
+    gettimeofday(&tv, NULL); 
+    currentTime = 1e6*tv.tv_sec + tv.tv_usec;
   }
   
   pthread_mutex_lock(prodCountMut);
@@ -326,7 +344,7 @@ void *consumer (void *arg)
     pthread_mutex_lock (fifo->mut);
     //printf("Waking thread #%d\n", tid);
     while (fifo->empty && !PRODUCERS_TERMINATED) {
-      printf ("consumer: queue EMPTY from thread #%d and %d.\n", tid, PRODUCERS_TERMINATED);
+      // printf ("consumer: queue EMPTY from thread #%d and %d.\n", tid, PRODUCERS_TERMINATED);
       pthread_cond_wait (fifo->notEmpty, fifo->mut);
       //printf("Continuing from thread #%d\n", tid);
     }
@@ -343,12 +361,12 @@ void *consumer (void *arg)
     
     // Measure time
     threadFuncArg *arg = (threadFuncArg *) d.arg;
-    time_t start = arg->start;
-    time_t end;
+    double start = arg->start;
+    double end;
     double elapsedTime;
     struct timeval tv;
     gettimeofday(&tv, NULL); 
-    end=tv.tv_sec;
+    end = 1e6*tv.tv_sec + tv.tv_usec;
     elapsedTime = (end - start);
     pthread_mutex_lock(timeMut);
     arrayAdd(conArray, elapsedTime);
